@@ -1,0 +1,330 @@
+---
+title: "improve bidding - Soaren"
+author: "Derek Lukacsko"
+date: "March 11 2021"
+output: pdf_document
+---
+
+## 1. Setup
+```{r 1.1 setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+# workspace
+packages <- c("tidyverse", "GGally", "gridExtra", "rpart", "rpart.plot")
+
+lapply(packages, library, character.only = TRUE)
+select <- dplyr::select
+library(ggplot2); theme_set(theme_bw()) 
+
+# main 
+df = read.csv("Soaren_Management_Lead_Bid_Test_Data.csv") %>% as_tibble() %>% distinct() %>%
+  mutate(BidPrice = replace_na(BidPrice,0), BidUtility = ExpectedRevenue*ExpectedConversion,
+         NetRevenue = ifelse(AcceptedBid == 1, BidUtility - BidPrice,0),
+         BidPrice = as.factor(BidPrice), AcceptedBid = as.factor(AcceptedBid),
+         Bid = ifelse(as.factor(BidPrice) == "0", 0, 1)) %>%  
+  select(-id) %>% rowid_to_column() 
+
+ # used distinct() because there was one duplicate 
+
+```
+
+
+```{r 1.2 formatting functions, echo = FALSE}
+
+# 0-1 Scale 
+scale01 <- function(x){(x-min(x))/(max(x)-min(x))}
+
+
+# Generic form
+'%=%' = function(l, r, ...) UseMethod('%=%')
+
+# Binary Operator
+'%=%.lbunch' = function(l, r, ...) {
+  Envir = as.environment(-1)
+
+  if (length(r) > length(l))
+    warning("RHS has more args than LHS. Only first", length(l), "used.")
+
+  if (length(l) > length(r))  {
+    warning("LHS has more args than RHS. RHS will be repeated.")
+    r <- extendToMatch(r, l)
+  }
+
+  for (II in 1:length(l)) {
+    do.call('<-', list(l[[II]], r[[II]]), envir=Envir)
+  }
+}
+
+# Used if LHS is larger than RHS
+extendToMatch <- function(source, destin) {
+  s <- length(source)
+  d <- length(destin)
+
+  # Assume that destin is a length when it is a single number and source is not
+  if(d==1 && s>1 && !is.null(as.numeric(destin)))
+    d <- destin
+
+  dif <- d - s
+  if (dif > 0) {
+    source <- rep(source, ceiling(d/s))[1:d]
+  }
+  return (source)
+}
+
+# Grouping the left hand side
+g = function(...) {
+  List = as.list(substitute(list(...)))[-1L]
+  class(List) = 'lbunch'
+  return(List)
+}
+
+
+```
+
+## 2. Looking around
+```{r 2.1 exploration plots, echo = FALSE}
+
+
+ggplot(df, aes(ExpectedRevenue, ExpectedConversion)) +
+    geom_hex() + facet_grid(BidPrice~AcceptedBid) + geom_vline(xintercept = 0, col = 2) + geom_hline(yintercept = 0.5)
+
+ggplot(df, aes(ExpectedConversion, ExpectedRevenue, color = BidPrice)) + geom_jitter(alpha = 0.4) + facet_wrap(Bid~AcceptedBid)
+ggplot(df, aes(BidUtility, NetRevenue, color = BidPrice)) + geom_jitter(alpha = 0.4) + facet_wrap(Bid~AcceptedBid)
+
+ggplot(df, aes(BidUtility)) + geom_histogram(bins = 25, color="black", fill = "white") + facet_grid(AcceptedBid~BidPrice)
+
+
+
+```
+
+
+```{r 2.2 confirmatory model, echo = FALSE}
+
+# we can only directly learn from bids placed 
+mod_df <- df %>% filter(Bid==1) %>% mutate(BidPrice = as.numeric(as.character(BidPrice)), 
+                                               AcceptedBid = as.numeric(as.character(AcceptedBid)),
+                                               BidPrice_scale = as.factor(BidPrice*(AcceptedBid/1)) )
+
+# confirmatory rule-set
+mod1 <- rpart(BidPrice_scale ~ ExpectedRevenue + ExpectedConversion, data = mod_df)
+print(mod1, digits = 2)
+rpart.plot(mod1, cex=0.65, type = 5)
+
+test_fit <- df %>% select(AcceptedBid, ExpectedRevenue, ExpectedConversion)
+accepted_fit <- mod1 %>% predict(test_fit, type = "class") %>% as_tibble() %>% rowid_to_column(., "rowid")
+
+
+```
+
+
+```{r 2.3 expected likelihood plots, echo = FALSE}
+
+par(mfrow = c(2,2))
+
+# assumption that the data provided is a regular sample
+# likelihood bidding 3, bid accepted:
+df_3 <- df %>% filter(as.numeric(as.character(BidPrice))==3)
+rangeP = seq(1,0,length.out=100)
+plot(rangeP, 
+     dbinom(x =sum(as.numeric(as.character(df_3$AcceptedBid))), size = sum(df_3$Bid), prob = rangeP), 
+     type = "l", xlab = "P(AcceptedBid)", ylab = "Density", , main = "All 3 bids")
+
+# likelihood bidding 35, bid accepted:
+df_35 <- df %>% filter(as.numeric(as.character(BidPrice))==35)
+plot(rangeP, 
+     dbinom(x =sum(as.numeric(as.character(df_35$AcceptedBid))), size = sum(df_35$Bid), prob = rangeP), 
+     type = "l", xlab = "P(AcceptedBid)", ylab = "Density", , main = "All 35 bids")
+
+# likelihood bidding 50, bid accepted:
+df_50 <- df %>% filter(as.numeric(as.character(BidPrice))==50)
+plot(rangeP, 
+     dbinom(x =sum(as.numeric(as.character(df_50$AcceptedBid))), size = sum(df_50$Bid), prob = rangeP), 
+     type = "l", xlab = "P(AcceptedBid)", ylab = "Density", main = "All 50 bids")
+
+# likelihood bidding 75, bid accepted:
+df_75 <- df %>% filter(as.numeric(as.character(BidPrice))==75)
+plot(rangeP, 
+     dbinom(x =sum(as.numeric(as.character(df_75$AcceptedBid))), size = sum(df_75$Bid), prob = rangeP), 
+     type = "l", xlab = "P(AcceptedBid)", ylab = "Density", main = "All 75 bids")
+
+```
+
+## 3. Solution attempt
+
+* The leads selected depend on the expected net revenue and the likelihood of acceptance. The former is given; the latter, inferred from the data. Three utility functions are defined. Utility1 only accounts for expected net revenue (labelled BidUtility here), while the latter two account for net revenue and likelihood of bid acceptance and discount BidUtility by the inferred amount.     
+  + utility 1 assumes we should bid on those leads with the highest expected payoff
+  + utility 2 takes into account the likelihood of a bid being accepted given the bid amount using the data provided
+  + utility 3 takes into account the likelihood of a bid being accepted given the bid amount naively assuming a linear relationship between bid amount and likelihood of acceptance
+
+```{r 3.1 define likelihood (p1) and naive prior (p2), echo = FALSE}
+
+bidtally <- table(df$BidPrice,df$AcceptedBid)
+tab_prior = round(prop.table(bidtally, margin=1)*100,2)
+
+g(p_3,p_35, p_50, p_75) %=% list(tab_prior[7]/100, tab_prior[8]/100, tab_prior[9]/100, tab_prior[10]/100)
+
+df_prior <- data.frame(BidPrice = c(3,35,50,75),
+                       p1 = c(p_3,p_35,p_50,p_75)) %>% mutate(p2 = c(BidPrice/100))
+             
+
+# df_prior used in pick_bids function, see 3.2
+             
+```
+
+
+```{r 3.2 define function, echo = FALSE}
+
+### algorithm for LeadUtility1 ###
+### 1 and 2 add multiplier to second condition ### 
+###
+# for each rowid:
+#   for each BidPrice:
+#     if ExpectedRevenue*ExpectedConversion - BidPrice < 0:
+#       Bid = 0
+#       LeadUtility = 0 
+#     else:
+#       Bid = 1
+#       LeadUtility = ExpectedRevenue*ExpectedConversion - BidPrice
+# 
+# slice_max(order_by = ExpectedRevenue, n=1) #group 
+# order_by ExpectedRevenue                   #df
+# select top m 
+
+
+# sample : data.frame with numeric fields rowid, BidPrice, BidUtility
+# assumption : see 3. Solution
+# detailed : prints utility for all possible bids 
+pick_bids <- function(sample, assumption = 1, detailed = TRUE){
+  
+  tmp = NULL
+  
+  if(assumption == 2){
+    for(i in 1:nrow(df2)){
+  
+    lead = df2[i,]
+    
+    if(lead$BidUtility<0) next 
+    
+    lead = rbind(lead, lead[rep(1,3),])
+    lead[,"BidPrice"] <- df_prior$BidPrice
+    
+    lead <- lead %>% left_join(.,df_prior, by = "BidPrice")  %>%
+      mutate(id = paste0(rowid,BidPrice),
+             Bid = ifelse(BidUtility - BidPrice < 0,0,1),
+             LeadUtility2 = scale01(ifelse(Bid == 1,p1*(BidUtility - BidPrice), 0))) %>% 
+      select(-c(BidUtility,Bid,p1,p2)) %>% relocate(id)
+    
+    if(detailed == FALSE){lead <- lead %>% slice_max(LeadUtility2)}
+    
+    
+    tmp = rbind(tmp, lead)
+    
+    }
+  }
+
+  else if(assumption == 3){
+    for(i in 1:nrow(df2)){
+  
+    lead = df2[i,]
+    
+    if(lead$BidUtility<0) next 
+    
+    lead = rbind(lead, lead[rep(1,3),])
+    lead[,"BidPrice"] <- df_prior$BidPrice
+    
+    lead <- lead %>% left_join(.,df_prior, by = "BidPrice")  %>%
+      mutate(id = paste0(rowid,BidPrice),
+             Bid = ifelse(BidUtility - BidPrice < 0,0,1),
+             LeadUtility3 = scale01(ifelse(Bid == 1,p2*(BidUtility - BidPrice), 0))) %>% 
+      select(-c(BidUtility,Bid,p1,p2)) %>% relocate(id)
+    
+    if(detailed == FALSE){lead <- lead %>% slice_max(LeadUtility3)}
+
+    
+    tmp = rbind(tmp, lead)
+    
+    }
+  }
+  
+  else{
+    for(i in 1:nrow(df2)){
+  
+    lead = df2[i,]
+    
+    if(lead$BidUtility<0) next 
+    
+    lead = rbind(lead, lead[rep(1,3),])
+    lead[,"BidPrice"] <- df_prior$BidPrice
+    
+    lead <- lead %>% mutate(id = paste0(rowid,BidPrice),
+                            Bid = ifelse(BidUtility - BidPrice < 0,0,1),
+                            LeadUtility1 = scale01(ifelse(Bid == 1,BidUtility - BidPrice, 0))) %>% 
+      select(-c(BidUtility,Bid)) %>% relocate(id)
+    
+    if(detailed == FALSE){lead <- lead %>% slice_max(LeadUtility1)}
+    
+    
+    tmp = rbind(tmp, lead)
+    
+    }
+  }
+  
+  return(tmp)
+  
+}
+
+```
+
+
+```{r 3.3. example, echo = FALSE}
+
+# initialize input
+df2 <- df %>% mutate(BidPrice = as.numeric(as.character(BidPrice))) %>% 
+  select(-c(AcceptedBid, Bid, NetRevenue, ExpectedRevenue, ExpectedConversion)) %>% 
+  relocate(BidUtility, .after = last_col()) %>% slice_head(n=100)
+
+# run function for each assumption
+sample1 <- pick_bids(df2)
+sample2 <- pick_bids(df2, 2)
+sample3 <- pick_bids(df2, 3)
+
+# combine outputs
+samples123 <- sample1 %>% 
+  left_join(.,sample2, by = c("id","rowid","BidPrice")) %>% left_join(.,sample3, by = c("id","rowid","BidPrice"))   
+samples_long <- samples123 %>% select(-id) %>%  gather(key = "k", value = "v", -rowid, -BidPrice)
+
+ggplot(samples_long, aes(v)) + geom_histogram() + facet_grid(BidPrice~k)
+p1<-ggplot(samples_long, aes(v)) + geom_histogram() + facet_wrap(~k)
+p2<-ggplot(samples123, aes(LeadUtility1, LeadUtility2)) + geom_jitter(alpha = 0.2, size = 2)
+p3<-ggplot(samples123, aes(LeadUtility1, LeadUtility3)) + geom_jitter(alpha = 0.2, size = 2)
+p4<-ggplot(samples123, aes(LeadUtility2, LeadUtility3)) + geom_jitter(alpha = 0.2, size = 2)
+
+grid.arrange(p1, p2, p3, p4, layout_matrix = rbind(c(1,1,1),c(2,3,4)))
+
+```
+
+* Observations
+  + all three methods find utility in variously priced bids, but all choose 3 
+  + there is significant variability in which leads are chosen (see lower 3 facets; the darkest regions are 00 10 01 and 11)
+  + all three produce extremes estimates (0 and 1)  making it clear which leads we should NOT bid on but unclear which potential bids are most favorable
+  + conclusion: these only seem useful for narrowing the search of what leads NOT to bid on but are extremely  
+  
+
+```{r 3.4 aggregate results, echo=FALSE}
+
+# df2 <- df %>% mutate(BidPrice = as.numeric(as.character(BidPrice))) %>% 
+#   select(-c(AcceptedBid, Bid, NetRevenue, ExpectedRevenue, ExpectedConversion)) %>% 
+#   relocate(BidUtility, .after = last_col())
+# 
+# sample1 <- pick_bids(df2, detailed = FALSE) %>% select(-id) 
+# sample2 <- pick_bids(df2, 2, detailed = FALSE) %>% select(-id) 
+# sample3 <- pick_bids(df2, 3, detailed = FALSE) %>% select(-id) 
+# 
+# tmp <- sample1 %>% left_join(., sample2, by = c("rowid","BidPrice")) %>% left_join(., sample3)
+# tmp[is.na(tmp)] <- 0
+
+# ggplot(sample1, aes(LeadUtility1)) + geom_density() + facet_wrap(~BidPrice)
+
+```
+
