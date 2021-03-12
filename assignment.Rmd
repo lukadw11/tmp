@@ -1,5 +1,5 @@
 ---
-title: "improve bidding - Soaren"
+title: "problem: improve bidding"
 author: "Derek Lukacsko"
 date: "March 11 2021"
 output: pdf_document
@@ -28,6 +28,9 @@ df = read.csv("Soaren_Management_Lead_Bid_Test_Data.csv") %>% as_tibble() %>% di
  # used distinct() because there was one duplicate 
 
 ```
+
+* General comments
+  + This is a two stage problem: we don't know if bids will be accepted OR whether bids will convert to leads. An estimate was provided for the latter, but not the former. So I spent time thinking about this problem from a bayesian perspective but I think this wasn't productive because I did not (yet) bring back P(Bid X amount | X amount accepted) to the objective, maximizing revenue. I thought about if I had actual profit numbers for each bid, I could set this up as a two-stage supervised  problem: (1) revenue <- BidUtility, (2) BidUtility <- BidAmount + priors. I could train a portion of the data where bids were made, test/dev it on the remainder, and fit it to the whole set after. I also thought about bootstrapping the estimated bid priors and expected lead acceptance. My biggest issue is that I don't see how I can provide a model that improves revenue without observed revenue values. I can explore the above (and bid optimization which I started skimming journal papers), but I don't see how to go beyond making the model merely analytic and how I can fully leverage the leads where bids weren't made. This is my first exposure to this type of problem. I limited myself to one day to work on this but look for the opprotunity to move forward with some advice. Look forward to hearing your feedback.             
 
 
 ```{r 1.2 formatting functions, echo = FALSE}
@@ -311,7 +314,7 @@ grid.arrange(p1, p2, p3, p4, layout_matrix = rbind(c(1,1,1),c(2,3,4)))
   + conclusion: these only seem useful for narrowing the search of what leads NOT to bid on but are extremely  
   
 
-```{r 3.4 aggregate results, echo=FALSE}
+```{r 3.4 aggregate results, i.e. which leads and what bid amount, echo=FALSE}
 
 # df2 <- df %>% mutate(BidPrice = as.numeric(as.character(BidPrice))) %>% 
 #   select(-c(AcceptedBid, Bid, NetRevenue, ExpectedRevenue, ExpectedConversion)) %>% 
@@ -327,4 +330,6 @@ grid.arrange(p1, p2, p3, p4, layout_matrix = rbind(c(1,1,1),c(2,3,4)))
 # ggplot(sample1, aes(LeadUtility1)) + geom_density() + facet_wrap(~BidPrice)
 
 ```
+
+
 
